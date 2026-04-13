@@ -1,0 +1,59 @@
+<!-- dashboard/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PulseDB Cloud | Dashboard</title>
+    <link rel="stylesheet" href="index.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">PULSEDB CLOUD</div>
+            <div class="node-status">
+                <div class="status-indicator"></div>
+                <span id="node-id">Node: node1</span>
+            </div>
+        </header>
+
+        <div class="stats-grid">
+            <div class="card">
+                <h3>Total Ops</h3>
+                <div class="value" id="total-ops">0</div>
+            </div>
+            <div class="card">
+                <h3>Keys Count</h3>
+                <div class="value" id="key-count">0</div>
+            </div>
+            <div class="card">
+                <h3>Latency</h3>
+                <div class="value" id="avg-latency">1.2ms</div>
+            </div>
+            <div class="card">
+                <h3>Uptime</h3>
+                <div class="value" id="uptime">24:12</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="card">
+                <h3>Live Activity</h3>
+                <div class="activity-feed" id="activity-feed">
+                    <!-- Activities will appear here -->
+                </div>
+            </div>
+            <div class="card">
+                <h3>Quick Console</h3>
+                <input type="text" id="console-input" placeholder="SET key value">
+                <button id="send-btn">Execute</button>
+                <div id="console-output" style="margin-top: 1rem; font-family: monospace; font-size: 0.875rem; color: var(--accent);">
+                    Waiting for input...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="index.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  node1:
+    build: .
+    ports:
+      - "8001:8000"
+      - "6379:6379"
+    environment:
+      - NODE_ID=node1
+      - CLUSTER_NODES=node1,node2,node3
+
+  node2:
+    build: .
+    ports:
+      - "8002:8000"
+      - "6380:6379"
+    environment:
+      - NODE_ID=node2
+      - CLUSTER_NODES=node1,node2,node3
+
+  node3:
+    build: .
+    ports:
+      - "8003:8000"
+      - "6381:6379"
+    environment:
+      - NODE_ID=node3
+      - CLUSTER_NODES=node1,node2,node3

@@ -1,0 +1,25 @@
+# Virtual environment
+workenv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# Local database files
+pulsedb.wal
+pulsedb.snapshot
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
