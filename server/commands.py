@@ -138,10 +138,11 @@ async def execute(command: str, args: list, persist: bool = True):
     elif command == "APPEND":
         key = args[0]
         suffix = args[1]
-        existing = store.get(key) or ""
-        new_val = existing + suffix
-        store.set(key, new_val)
-        return len(new_val)
+        existing = store.get(key)
+        existing_str = str(existing) if existing is not None else ""
+        appended_val = existing_str + str(suffix)
+        store.set(key, appended_val)
+        return len(appended_val)
 
     elif command == "GETSET":
         key = args[0]

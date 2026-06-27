@@ -23,7 +23,7 @@ class VectorIndex:
 
     def __init__(self, space: str = 'cosine'):
         self._space = space
-        self._dim = None
+        self._dim: int | None = None
         self._index: Any = None
         self._lock = threading.RLock()
         

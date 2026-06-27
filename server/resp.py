@@ -124,7 +124,7 @@ async def decode_command(reader: asyncio.StreamReader):
     if count <= 0:
         return None, None
 
-    elements = []
+    elements: list[str | None] = []
     for _ in range(count):
         type_byte = await reader.readexactly(1)
         if type_byte == b"$":
@@ -139,8 +139,8 @@ async def decode_command(reader: asyncio.StreamReader):
                 elements.append(data.decode("utf-8", errors="replace"))
         else:
             # Unexpected type inside command array
-            line = await reader.readline()
-            elements.append((type_byte + line).decode("utf-8", errors="replace").strip())
+            raw_line = await reader.readline()
+            elements.append((type_byte + raw_line).decode("utf-8", errors="replace").strip())
 
     if not elements:
         return None, None
