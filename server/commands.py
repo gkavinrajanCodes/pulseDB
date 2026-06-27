@@ -399,7 +399,7 @@ async def execute(command: str, args: list, persist: bool = True):
         # RESP flat array: field1, val1, field2, val2, ...
         flat = []
         for f, v in h.items():
-            flat.extend([f, v])
+            flat.extend([f, str(v) if v is not None else ""])
         return flat
 
     elif command == "HKEYS":

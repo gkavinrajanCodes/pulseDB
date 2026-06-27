@@ -147,6 +147,6 @@ async def decode_command(reader: asyncio.StreamReader):
     if not elements:
         return None, None
 
-    command = elements[0].decode("utf-8", errors="replace").upper() if elements[0] else None
+    command_str = elements[0].decode("utf-8", errors="replace").upper() if elements[0] else ""
     args = [e for e in elements[1:] if e is not None]
-    return command, args
+    return command_str, args

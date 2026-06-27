@@ -164,7 +164,7 @@ class VectorIndex:
                     else:
                         raise e
                         
-            if best_labels is None:
+            if best_labels is None or best_dists is None:
                 return []
                 
             results = []
