@@ -29,9 +29,10 @@ async def get_api_key(api_key: str = Security(api_key_header)):
     raise HTTPException(status_code=403, detail="Invalid or missing API key")
 
 
-# --- Rate Limiting (simple sliding window per IP) ---
+# Rate Limiting (simple sliding window per IP)
 _rate_store: dict = {}
 RATE_LIMIT_PER_SEC = 50  # requests per IP per second
+_RATE_STORE_MAX = 10_000  # cap entries to prevent memory leak
 
 
 @app.middleware("http")
@@ -45,6 +46,11 @@ async def rate_limit_middleware(request: Request, call_next):
             content={"detail": "Too Many Requests"},
         )
     _rate_store[client_ip] = now
+    # Prune if too large — keep newest half
+    if len(_rate_store) > _RATE_STORE_MAX:
+        oldest = sorted(_rate_store, key=_rate_store.__getitem__)
+        for ip in oldest[:_RATE_STORE_MAX // 2]:
+            _rate_store.pop(ip, None)
     return await call_next(request)
 
 

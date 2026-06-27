@@ -3,6 +3,7 @@ import httpx
 import time
 
 URL = "http://127.0.0.1:8000/command"
+API_KEY = "pulse-db-secret-key"
 TOTAL_REQUESTS = 10000
 
 async def send_request(client, i):
@@ -10,7 +11,7 @@ async def send_request(client, i):
         "command": "SET",
         "args": [f"key{i}", "value"]
     }
-    await client.post(URL, json=payload)
+    await client.post(URL, json=payload, headers={"X-API-Key": API_KEY})
 
 async def run_benchmark():
     async with httpx.AsyncClient() as client:

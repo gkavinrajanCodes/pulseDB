@@ -23,7 +23,7 @@ async def handle_client(reader, writer):
             args = parts[1:]
             
             try:
-                result = execute(command, args)
+                result = await execute(command, args)
                 response = encode_message(TYPE_RESPONSE, result)
             except Exception as e:
                 response = encode_message(TYPE_ERROR, str(e))

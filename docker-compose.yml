@@ -10,6 +10,9 @@ services:
     environment:
       - NODE_ID=node1
       - CLUSTER_NODES=node1,node2,node3
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3
 
   node2:
     build: .
@@ -19,6 +22,9 @@ services:
     environment:
       - NODE_ID=node2
       - CLUSTER_NODES=node1,node2,node3
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3
 
   node3:
     build: .
@@ -28,3 +34,6 @@ services:
     environment:
       - NODE_ID=node3
       - CLUSTER_NODES=node1,node2,node3
+      - NODE1_HOST=node1
+      - NODE2_HOST=node2
+      - NODE3_HOST=node3

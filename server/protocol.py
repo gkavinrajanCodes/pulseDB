@@ -1,6 +1,7 @@
 # server/protocol.py
 
 import struct
+import asyncio
 
 # Simple binary protocol:
 # [1 byte type] [4 bytes length] [length bytes data]
@@ -25,10 +26,16 @@ def encode_message(msg_type, data):
     return struct.pack("!BI", msg_type, length) + data
 
 async def decode_message(reader):
-    header = await reader.read(5)
-    if not header:
+    try:
+        header = await reader.readexactly(5)
+    except (asyncio.IncompleteReadError, ConnectionResetError):
         return None, None
-    
+
     msg_type, length = struct.unpack("!BI", header)
-    data = await reader.read(length)
-    return msg_type, data.decode()
+
+    try:
+        data = await reader.readexactly(length)
+    except asyncio.IncompleteReadError:
+        return None, None
+
+    return msg_type, data.decode("utf-8", errors="replace")
