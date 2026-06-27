@@ -16,8 +16,8 @@ async def test_vector_basic():
     assert await execute("VECTOR.COUNT", []) == 2
     
     # GET
-    assert await execute("VECTOR.GET", ["doc1"]) == [1.0, 0.0]
-    assert await execute("VECTOR.GET", ["missing"]) == "NULL"
+    assert await execute("VECTOR.GET", ["doc1"]) == {"vector": [1.0, 0.0], "metadata": {}}
+    assert await execute("VECTOR.GET", ["doc_missing"]) == "NULL"
     
     # SEARCH
     results = await execute("VECTOR.SEARCH", ["1.0", "0.0", "TOP_K", "1"])

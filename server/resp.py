@@ -109,13 +109,15 @@ async def decode_command(reader: asyncio.StreamReader):
         # Not a RESP array — either inline command or bad client
         # Try to handle inline (e.g., from telnet): read until \n
         rest = await reader.readline()
-        line = (first_byte + rest).decode("utf-8", errors="replace").strip()
+        line = (first_byte + rest).strip()
         if not line:
             return None, None
         parts = line.split()
         if not parts:
             return None, None
-        return parts[0].upper(), parts[1:]
+        command = parts[0].decode("utf-8", errors="replace").upper()
+        args = parts[1:]
+        return command, args
 
     # Read array length
     count_line = await reader.readline()
@@ -124,7 +126,7 @@ async def decode_command(reader: asyncio.StreamReader):
     if count <= 0:
         return None, None
 
-    elements: list[str | None] = []
+    elements: list[bytes | None] = []
     for _ in range(count):
         type_byte = await reader.readexactly(1)
         if type_byte == b"$":
@@ -136,15 +138,15 @@ async def decode_command(reader: asyncio.StreamReader):
             else:
                 data = await reader.readexactly(length)
                 await reader.readexactly(2)  # consume \r\n
-                elements.append(data.decode("utf-8", errors="replace"))
+                elements.append(data)
         else:
             # Unexpected type inside command array
             raw_line = await reader.readline()
-            elements.append((type_byte + raw_line).decode("utf-8", errors="replace").strip())
+            elements.append((type_byte + raw_line).strip())
 
     if not elements:
         return None, None
 
-    command = elements[0].upper() if elements[0] else None
-    args = [str(e) for e in elements[1:] if e is not None]
+    command = elements[0].decode("utf-8", errors="replace").upper() if elements[0] else None
+    args = [e for e in elements[1:] if e is not None]
     return command, args

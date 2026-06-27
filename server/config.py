@@ -20,7 +20,9 @@ CLUSTER_NODES: list[str] = os.getenv("CLUSTER_NODES", "node1").split(",")
 # --- Persistence ---
 WAL_FILE: str = os.getenv("WAL_FILE", "pulsedb.wal")
 SNAPSHOT_FILE: str = os.getenv("SNAPSHOT_FILE", "pulsedb.snapshot")
-SNAPSHOT_INTERVAL: int = int(os.getenv("SNAPSHOT_INTERVAL", "60"))
+SNAPSHOT_INTERVAL: int = int(os.getenv("SNAPSHOT_INTERVAL", "5"))
+VECTOR_INDEX_FILE: str = os.getenv("VECTOR_INDEX_FILE", "pulsedb.hnsw")
+VECTOR_META_FILE: str = os.getenv("VECTOR_META_FILE", "pulsedb_hnsw.meta.json")
 
 # --- Networking ---
 TCP_HOST: str = os.getenv("TCP_HOST", "0.0.0.0")

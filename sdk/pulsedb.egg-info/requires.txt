@@ -1,0 +1,6 @@
+httpx>=0.26.0
+
+[dev]
+pytest
+pytest-asyncio
+respx

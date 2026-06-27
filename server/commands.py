@@ -12,11 +12,75 @@ from server.persistence import wal
 from server.cluster import cluster_manager
 from server.vector import vector_index
 from server.data_types import list_store, hash_store
+import numpy as np
 
 
 
 async def execute(command: str, args: list, persist: bool = True):
     command = command.upper()
+
+    # ------------------------------------------------------------------
+    # Binary Protocol Handling (AI Memory Layer)
+    # ------------------------------------------------------------------
+    if command == "VECTOR.BSET":
+        if len(args) < 2:
+            return "ERROR: VECTOR.BSET requires key and binary blob"
+        key = args[0].decode("utf-8", errors="replace") if isinstance(args[0], bytes) else args[0]
+        blob = args[1]
+        if not isinstance(blob, bytes):
+            return "ERROR: BSET payload must be binary bytes"
+            
+        metadata = None
+        if len(args) >= 4 and (args[2].upper() == b"METADATA" or args[2] == "METADATA"):
+            import json
+            try:
+                meta_str = args[3].decode("utf-8") if isinstance(args[3], bytes) else args[3]
+                metadata = json.loads(meta_str)
+            except Exception:
+                return "ERROR: Invalid METADATA JSON"
+                
+        try:
+            vector = np.frombuffer(blob, dtype=np.float32).tolist()
+            return vector_index.set(key, vector, metadata)
+        except Exception as e:
+            return f"ERROR: Invalid binary blob: {e}"
+
+    elif command == "VECTOR.BSEARCH":
+        try:
+            blob = args[0]
+            if not isinstance(blob, bytes):
+                return "ERROR: BSEARCH payload must be binary bytes"
+            
+            top_k_str = args[2].decode("utf-8") if isinstance(args[2], bytes) else args[2]
+            top_k = int(top_k_str)
+            
+            filter_dict = None
+            if len(args) >= 5 and (args[3].upper() == b"FILTER" or args[3] == "FILTER"):
+                import json
+                try:
+                    filter_str = args[4].decode("utf-8") if isinstance(args[4], bytes) else args[4]
+                    filter_dict = json.loads(filter_str)
+                except Exception:
+                    return "ERROR: Invalid FILTER JSON"
+            
+            query = np.frombuffer(blob, dtype=np.float32).tolist()
+            results = vector_index.search(query, top_k, filter_dict)
+            
+            flat = []
+            for k, score in results:
+                flat.extend([k, f"{score:.6f}"])
+            return flat
+        except Exception as e:
+            return f"ERROR: {str(e)}"
+            
+    # Decode arguments for all standard text-based commands
+    args_str = []
+    for a in args:
+        if isinstance(a, bytes):
+            args_str.append(a.decode("utf-8", errors="replace"))
+        else:
+            args_str.append(a)
+    args = args_str
 
     # ------------------------------------------------------------------
     # Cluster routing: for single-key commands, forward to the owner node

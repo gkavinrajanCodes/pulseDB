@@ -4,7 +4,8 @@ import json
 import time
 import threading
 
-from server.config import WAL_FILE, SNAPSHOT_FILE, SNAPSHOT_INTERVAL
+from server.config import WAL_FILE, SNAPSHOT_FILE, SNAPSHOT_INTERVAL, VECTOR_INDEX_FILE, VECTOR_META_FILE
+from server.vector import vector_index
 
 
 class WAL:
@@ -74,6 +75,12 @@ class WAL:
         os.replace(tmp_path, SNAPSHOT_FILE)
         print(f"[Snapshot] Saved {len(all_data)} keys → {SNAPSHOT_FILE}")
 
+        # 2b. Snapshot the Vector Index
+        try:
+            vector_index.save(VECTOR_INDEX_FILE, VECTOR_META_FILE)
+        except Exception as e:
+            print(f"[Snapshot] Error saving vector index: {e}")
+
         # 3. Compact the WAL — truncate it now that the snapshot is durable
         self._compact_wal()
 
@@ -102,6 +109,12 @@ class WAL:
         for k, v in data.items():
             store.set(k, v)
         print(f"  Loaded {len(data)} keys from snapshot.")
+        
+        # Load Vector Index
+        try:
+            vector_index.load(VECTOR_INDEX_FILE, VECTOR_META_FILE)
+        except Exception as e:
+            print(f"[Snapshot] Error loading vector index: {e}")
 
     def close(self):
         with self._lock:

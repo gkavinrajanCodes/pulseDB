@@ -7,6 +7,8 @@ The dimensionality of the index is determined by the first vector inserted.
 """
 
 import threading
+import json
+import os
 from typing import Any
 import numpy as np
 
@@ -32,8 +34,8 @@ class VectorIndex:
         self._id_to_key: dict[int, str] = {}
         self._next_id = 0
         
-        # Keep the raw vectors so we can retrieve them (hnswlib doesn't store the raw vectors in a queryable way easily)
-        self._store: dict[str, list[float]] = {}
+        # Maps key -> {"vector": list[float], "metadata": dict}
+        self._store: dict[str, dict[str, Any]] = {}
 
     def _init_index(self, dim: int):
         """Initialize the HNSW index on the first insertion."""
@@ -48,7 +50,7 @@ class VectorIndex:
         if self._index is not None and self._index.element_count >= self._index.max_elements:
             self._index.resize_index(self._index.max_elements * 2)
 
-    def set(self, key: str, vector: list[float]) -> str:
+    def set(self, key: str, vector: list[float], metadata: dict | None = None) -> str:
         """Insert or update a vector in the index."""
         if hnswlib is None:
             raise RuntimeError("hnswlib is not installed. Run 'pip install hnswlib'")
@@ -79,12 +81,12 @@ class VectorIndex:
             np_vector = np.array([vector], dtype=np.float32)
             # pyrefly: ignore [missing-attribute]
             self._index.add_items(np_vector, np.array([label]))
-            self._store[key] = vector
+            self._store[key] = {"vector": vector, "metadata": metadata or {}}
             
             return "OK"
 
-    def get(self, key: str) -> list[float] | None:
-        """Get the raw vector for a key."""
+    def get(self, key: str) -> dict[str, Any] | None:
+        """Get the vector and metadata for a key."""
         with self._lock:
             return self._store.get(key)
 
@@ -104,7 +106,7 @@ class VectorIndex:
             
             return 1
 
-    def search(self, query: list[float], top_k: int = 5) -> list[tuple[str, float]]:
+    def search(self, query: list[float], top_k: int = 5, filter_dict: dict | None = None) -> list[tuple[str, float]]:
         """
         Search for the top-k most similar vectors using HNSW.
         Returns a list of (key, similarity_score) tuples.
@@ -127,12 +129,46 @@ class VectorIndex:
                 
             np_query = np.array([query], dtype=np.float32)
             
-            # knn_query returns (labels, distances)
-            # Distance for 'cosine' space is (1 - cosine_similarity).
-            labels, distances = self._index.knn_query(np_query, k=actual_k)
+            filter_func = None
+            if filter_dict:
+                def _filter(label: int) -> bool:
+                    key = self._id_to_key.get(label)
+                    if not key:
+                        return False
+                    item_meta = self._store.get(key, {}).get("metadata", {})
+                    # Exact match for all keys in filter_dict
+                    for k, v in filter_dict.items():
+                        if item_meta.get(k) != v:
+                            return False
+                    return True
+                filter_func = _filter
             
+            # hnswlib throws a RuntimeError if the filter prevents it from finding exactly 'actual_k' elements.
+            # We use a binary search backoff to find the maximum possible k that succeeds.
+            low = 1
+            high = actual_k
+            best_labels = None
+            best_dists = None
+            
+            while low <= high:
+                mid = (low + high) // 2
+                try:
+                    # pyrefly: ignore [missing-attribute]
+                    labels, distances = self._index.knn_query(np_query, k=mid, filter=filter_func)
+                    best_labels = labels
+                    best_dists = distances
+                    low = mid + 1
+                except Exception as e:
+                    if "Cannot return the results in a contiguous 2D array" in str(e):
+                        high = mid - 1
+                    else:
+                        raise e
+                        
+            if best_labels is None:
+                return []
+                
             results = []
-            for label, dist in zip(labels[0], distances[0]):
+            for label, dist in zip(best_labels[0], best_dists[0]):
                 # If deleted items somehow show up, skip them
                 if label not in self._id_to_key:
                     continue
@@ -157,6 +193,60 @@ class VectorIndex:
             self._id_to_key.clear()
             self._next_id = 0
             self._store.clear()
+
+    def save(self, filename: str, meta_filename: str):
+        """Save the HNSW graph and metadata to disk."""
+        with self._lock:
+            if self._index is None:
+                return  # Nothing to save
+            
+            # Save the binary HNSW index
+            self._index.save_index(filename)
+            
+            # Save the metadata (keys, raw vectors)
+            meta = {
+                "dim": self._dim,
+                "next_id": self._next_id,
+                "key_to_id": self._key_to_id,
+                "id_to_key": {str(k): v for k, v in self._id_to_key.items()},
+                "store": self._store
+            }
+            tmp_meta = meta_filename + ".tmp"
+            with open(tmp_meta, "w") as f:
+                json.dump(meta, f)
+            os.replace(tmp_meta, meta_filename)
+            
+    def load(self, filename: str, meta_filename: str):
+        """Load the HNSW graph and metadata from disk."""
+        if hnswlib is None:
+            raise RuntimeError("hnswlib is not installed.")
+            
+        with self._lock:
+            if not os.path.exists(meta_filename) or not os.path.exists(filename):
+                return
+                
+            print(f"Loading AI Memory from {filename} ...")
+            with open(meta_filename, "r") as f:
+                meta = json.load(f)
+                
+            self._dim = meta["dim"]
+            self._next_id = meta["next_id"]
+            self._key_to_id = meta["key_to_id"]
+            self._id_to_key = {int(k): v for k, v in meta["id_to_key"].items()}
+            
+            # Auto-migrate legacy stores (which mapped string -> list)
+            raw_store = meta["store"]
+            for k, v in raw_store.items():
+                if isinstance(v, list):
+                    raw_store[k] = {"vector": v, "metadata": {}}
+            self._store = raw_store
+            
+            # Reconstruct hnswlib.Index
+            # pyrefly: ignore [missing-attribute]
+            self._index = hnswlib.Index(space=self._space, dim=self._dim)
+            max_elements = max(10000, len(self._store) * 2)
+            self._index.load_index(filename, max_elements=max_elements)
+            print(f"  Loaded {len(self._store)} vectors into AI Memory.")
 
 # Global singleton for the AI Memory Layer
 vector_index = VectorIndex()
