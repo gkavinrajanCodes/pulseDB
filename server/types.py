@@ -162,7 +162,7 @@ class HashStore:
         with lock:
             h = data.setdefault(key, {})
             is_new = field not in h
-            h[field] = str(value)
+            h[field] = value
             return 1 if is_new else 0
 
     def hmset(self, key: str, mapping: dict) -> str:

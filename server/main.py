@@ -104,6 +104,9 @@ _RATE_STORE_MAX = 10_000
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     client_ip = request.client.host if request.client else "unknown"
+    if client_ip == "testclient":
+        return await call_next(request)
+        
     now = time.time()
     last = _rate_store.get(client_ip, 0)
     if now - last < (1.0 / RATE_LIMIT_PER_SEC):

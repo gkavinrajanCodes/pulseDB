@@ -256,7 +256,11 @@ async def execute(command: str, args: list, persist: bool = True):
             query = [float(x) for x in vector_args]
         except ValueError:
             return "ERROR: query vector dimensions must be floats"
-        results = vector_index.search(query, top_k)
+        try:
+            results = vector_index.search(query, top_k)
+        except ValueError as e:
+            return f"ERROR: {str(e)}"
+            
         flat = []
         for key, score in results:
             flat.extend([key, f"{score:.6f}"])

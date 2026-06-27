@@ -80,7 +80,7 @@ class Shard:
     def expire(self, key: str, ttl: float) -> int:
         with self.lock:
             if key in self.data:
-                self.expiry[key] = time.time() + float(ttl)
+                self.expiry[key] = time.time() + ttl
                 return 1
             return 0
 
