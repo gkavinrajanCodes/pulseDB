@@ -128,7 +128,7 @@ async def _resp_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
 
     while True:
         command, args = await decode_command(reader)
-        if command is None:
+        if command is None or args is None:
             break
 
         response = await _handle_resp_command(command, args)
