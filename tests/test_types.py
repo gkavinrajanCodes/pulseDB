@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 from server.commands import execute
-from server.types import list_store, hash_store
+from server.data_types import list_store, hash_store
 
 
 @pytest.fixture(autouse=True)

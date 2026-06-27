@@ -11,7 +11,7 @@ from server.pubsub import pubsub
 from server.persistence import wal
 from server.cluster import cluster_manager
 from server.vector import vector_index
-from server.types import list_store, hash_store
+from server.data_types import list_store, hash_store
 
 
 
