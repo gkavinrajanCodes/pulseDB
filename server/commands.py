@@ -11,6 +11,8 @@ from server.pubsub import pubsub
 from server.persistence import wal
 from server.cluster import cluster_manager
 from server.vector import vector_index
+from server.types import list_store, hash_store
+
 
 
 async def execute(command: str, args: list, persist: bool = True):
@@ -262,6 +264,89 @@ async def execute(command: str, args: list, persist: bool = True):
 
     elif command == "VECTOR.COUNT":
         return vector_index.count()
+
+    # ------------------------------------------------------------------
+    # List commands
+    # ------------------------------------------------------------------
+    elif command == "LPUSH":
+        return list_store.lpush(args[0], *args[1:])
+
+    elif command == "RPUSH":
+        return list_store.rpush(args[0], *args[1:])
+
+    elif command == "LPOP":
+        v = list_store.lpop(args[0])
+        return v if v is not None else "NULL"
+
+    elif command == "RPOP":
+        v = list_store.rpop(args[0])
+        return v if v is not None else "NULL"
+
+    elif command == "LRANGE":
+        return list_store.lrange(args[0], int(args[1]), int(args[2]))
+
+    elif command == "LLEN":
+        return list_store.llen(args[0])
+
+    elif command == "LINDEX":
+        v = list_store.lindex(args[0], int(args[1]))
+        return v if v is not None else "NULL"
+
+    elif command == "LSET":
+        return list_store.lset(args[0], int(args[1]), args[2])
+
+    elif command == "LREM":
+        return list_store.lrem(args[0], int(args[1]), args[2])
+
+    # ------------------------------------------------------------------
+    # Hash commands
+    # ------------------------------------------------------------------
+    elif command == "HSET":
+        # HSET key field value [field value ...]
+        key = args[0]
+        added = 0
+        for i in range(1, len(args), 2):
+            added += hash_store.hset(key, args[i], args[i + 1])
+        return added
+
+    elif command == "HMSET":
+        key = args[0]
+        mapping = {args[i]: args[i + 1] for i in range(1, len(args), 2)}
+        return hash_store.hmset(key, mapping)
+
+    elif command == "HGET":
+        v = hash_store.hget(args[0], args[1])
+        return v if v is not None else "NULL"
+
+    elif command == "HMGET":
+        results = hash_store.hmget(args[0], *args[1:])
+        return [v if v is not None else "NULL" for v in results]
+
+    elif command == "HDEL":
+        return hash_store.hdel(args[0], *args[1:])
+
+    elif command == "HGETALL":
+        h = hash_store.hgetall(args[0])
+        # RESP flat array: field1, val1, field2, val2, ...
+        flat = []
+        for f, v in h.items():
+            flat.extend([f, v])
+        return flat
+
+    elif command == "HKEYS":
+        return hash_store.hkeys(args[0])
+
+    elif command == "HVALS":
+        return hash_store.hvals(args[0])
+
+    elif command == "HLEN":
+        return hash_store.hlen(args[0])
+
+    elif command == "HEXISTS":
+        return hash_store.hexists(args[0], args[1])
+
+    elif command == "HINCRBY":
+        return hash_store.hincrby(args[0], args[1], int(args[2]))
 
     else:
         return f"ERROR: Unknown command '{command}'"

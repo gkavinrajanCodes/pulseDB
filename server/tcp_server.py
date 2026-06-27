@@ -3,98 +3,143 @@
 Dual-protocol TCP server.
 
 Supports two wire protocols on the same port (6379):
-  1. RESP2  — the Redis wire protocol. Detected by first byte being '*' or
-              any printable ASCII (inline commands). redis-cli, redis-py,
-              ioredis, etc. all work out of the box.
-  2. Binary — PulseDB's own compact binary protocol (for SDK internal use).
-              Detected by first byte being 0x00, 0x01, or 0x02.
+  1. RESP2  — Redis wire protocol. redis-cli, redis-py, ioredis work out of the box.
+  2. Binary — PulseDB compact binary protocol (used by the internal SDK).
 
-This means ANY existing Redis client can connect to PulseDB with zero changes.
+Protocol is auto-detected from the first byte of each connection.
+
+Security:
+  Set PULSEDB_REQUIREPASS env var to require AUTH before any command over TCP.
+  The HTTP layer uses X-API-Key independently.
 """
 
 import asyncio
+import struct
 from server.resp import decode_command, encode, encode_simple, encode_error
 from server.protocol import decode_message, encode_message, TYPE_RESPONSE, TYPE_ERROR
 from server.commands import execute
+from server.config import REQUIRE_PASS, TCP_HOST, TCP_PORT
 
 
 # ---------------------------------------------------------------------------
-# RESP-specific command handling
+# Peekable reader — avoids touching asyncio private internals (_buffer hack)
 # ---------------------------------------------------------------------------
 
-# Redis commands that map to internal PulseDB commands
-_RESP_COMMAND_MAP = {
-    "PING":    ("PING", []),
-    "QUIT":    ("QUIT", []),
-    "SELECT":  ("SELECT", []),   # acknowledged but ignored (no multi-db)
-    "COMMAND": ("COMMAND", []),  # minimal compat shim
-    "DBSIZE":  ("DBSIZE", []),
-    "FLUSHDB": ("FLUSHDB", []),
-    "FLUSHALL":("FLUSHALL", []),
-}
+class _PeekedReader:
+    """
+    Wraps asyncio.StreamReader and prepends one already-read byte.
+    This lets us peek at the first byte for protocol detection without
+    touching the private _buffer attribute.
+    """
+    def __init__(self, reader: asyncio.StreamReader, peeked: bytes):
+        self._reader = reader
+        self._peeked = peeked   # at most 1 byte
+
+    async def readexactly(self, n: int) -> bytes:
+        if self._peeked:
+            if n == 1:
+                data, self._peeked = self._peeked, b""
+                return data
+            rest = await self._reader.readexactly(n - 1)
+            data, self._peeked = self._peeked + rest, b""
+            return data
+        return await self._reader.readexactly(n)
+
+    async def readline(self) -> bytes:
+        if self._peeked:
+            rest = await self._reader.readline()
+            data, self._peeked = self._peeked + rest, b""
+            return data
+        return await self._reader.readline()
+
+    async def read(self, n: int) -> bytes:
+        if self._peeked:
+            data, self._peeked = self._peeked, b""
+            return data
+        return await self._reader.read(n)
 
 
-async def _handle_resp_command(command: str, args: list) -> bytes:
-    """Translate a RESP command to a PulseDB execute() call and encode the result."""
+# ---------------------------------------------------------------------------
+# RESP2 command handler
+# ---------------------------------------------------------------------------
 
-    # Special-case commands that don't map to execute()
+async def _handle_resp_command(command: str, args: list, authenticated: bool) -> tuple[bytes, bool]:
+    """
+    Handle one RESP command. Returns (response_bytes, new_authenticated_state).
+    AUTH is handled here before anything else.
+    """
+    # AUTH command — must be processed before any auth gate
+    if command == "AUTH":
+        if not REQUIRE_PASS:
+            return encode_error("ERR Client sent AUTH, but no password is set. "
+                                "Did you mean ACL SETUSER with >password?"), True
+        password = args[0] if args else ""
+        if password == REQUIRE_PASS:
+            return encode_simple("OK"), True
+        return encode_error("WRONGPASS invalid username-password pair or user is "
+                            "disabled."), False
+
+    # Auth gate — reject everything except QUIT if not authenticated
+    if REQUIRE_PASS and not authenticated:
+        return encode_error("NOAUTH Authentication required."), False
+
+    # PING
     if command == "PING":
         msg = args[0] if args else "PONG"
-        return encode_simple(msg)
+        return encode_simple(msg), authenticated
 
+    # QUIT
     if command == "QUIT":
-        return encode_simple("OK")
+        return encode_simple("OK"), authenticated
 
-    if command in ("SELECT", "AUTH"):
-        # We only have DB 0. Accept SELECT 0, reject others.
-        if command == "SELECT" and args and args[0] != "0":
-            return encode_error("PulseDB does not support multiple databases")
-        return encode_simple("OK")
+    # SELECT — single DB only
+    if command == "SELECT":
+        if args and args[0] != "0":
+            return encode_error("PulseDB does not support multiple databases"), authenticated
+        return encode_simple("OK"), authenticated
 
+    # COMMAND — minimal compat shim so redis-py doesn't crash on connect
     if command == "COMMAND":
-        # Minimal compat: return empty array so redis-py doesn't crash on connect
-        return b"*0\r\n"
+        return b"*0\r\n", authenticated
 
+    # DBSIZE
     if command == "DBSIZE":
-        # Return total key count across all shards
         from server.store import store
-        count = sum(len(shard.data) for shard in store.shards)
-        return f":{count}\r\n".encode()
+        count = store.dbsize()
+        return f":{count}\r\n".encode(), authenticated
 
+    # FLUSHDB / FLUSHALL
     if command in ("FLUSHDB", "FLUSHALL"):
         from server.store import store
-        for shard in store.shards:
-            with shard.lock:
-                shard.data.clear()
-                shard.expiry.clear()
-        return encode_simple("OK")
+        store.flush()
+        return encode_simple("OK"), authenticated
 
-    # All other commands go through the normal execute() path
+    # All other commands → execute()
     try:
         result = await execute(command, args)
-        return encode(result)
+        return encode(result), authenticated
     except Exception as e:
-        return encode_error(str(e))
+        return encode_error(str(e)), authenticated
 
 
 # ---------------------------------------------------------------------------
-# Protocol detection + per-connection handler
+# Protocol detection
 # ---------------------------------------------------------------------------
 
 def _is_binary_protocol(first_byte: bytes) -> bool:
-    """
-    Our binary protocol type bytes are 0x00, 0x01, 0x02.
-    RESP and inline text always start with printable ASCII or '*', '+', '-', ':', '$'.
-    """
+    """Binary protocol type bytes are 0x00, 0x01, 0x02; RESP is printable ASCII."""
     return first_byte in (b"\x00", b"\x01", b"\x02")
 
+
+# ---------------------------------------------------------------------------
+# Per-connection handler
+# ---------------------------------------------------------------------------
 
 async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     address = writer.get_extra_info("peername")
     print(f"[TCP] New connection from {address}")
 
     try:
-        # Peek at the first byte to decide which protocol to use
         first_byte = await reader.readexactly(1)
     except (asyncio.IncompleteReadError, ConnectionResetError):
         writer.close()
@@ -106,7 +151,9 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         if use_binary:
             await _binary_loop(reader, writer, first_byte)
         else:
-            await _resp_loop(reader, writer, first_byte)
+            # Wrap reader so the peeked byte is transparently re-inserted
+            peeked_reader = _PeekedReader(reader, first_byte)
+            await _resp_loop(peeked_reader, writer)   # type: ignore[arg-type]
     except asyncio.CancelledError:
         pass
     except Exception as e:
@@ -120,42 +167,42 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             pass
 
 
-async def _resp_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, first_byte: bytes):
-    """Handle a RESP2 client (redis-cli, redis-py, ioredis, etc.)"""
-    # Put the peeked byte back by prepending to a new reader
-    # We do this by creating a buffered version — feed the byte back
-    reader._buffer[0:0] = first_byte  # type: ignore[attr-defined]
+# ---------------------------------------------------------------------------
+# RESP2 loop
+# ---------------------------------------------------------------------------
+
+async def _resp_loop(reader, writer: asyncio.StreamWriter):
+    """Handle a RESP2 client. Enforces REQUIREPASS if configured."""
+    authenticated = not bool(REQUIRE_PASS)   # auto-authenticated if no password set
 
     while True:
         command, args = await decode_command(reader)
         if command is None or args is None:
             break
 
-        response = await _handle_resp_command(command, args)
+        response, authenticated = await _handle_resp_command(command, args, authenticated)
         writer.write(response)
         await writer.drain()
 
-        # QUIT closes the connection
         if command == "QUIT":
             break
 
 
+# ---------------------------------------------------------------------------
+# Binary protocol loop
+# ---------------------------------------------------------------------------
+
 async def _binary_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, first_byte: bytes):
-    """Handle a PulseDB binary protocol client (internal SDK)."""
-    # Reconstruct the full 5-byte header: we already read 1 byte
+    """Handle a PulseDB binary protocol client."""
     try:
         remaining_header = await reader.readexactly(4)
     except (asyncio.IncompleteReadError, ConnectionResetError):
         return
 
-    import struct
     header = first_byte + remaining_header
-    msg_type, length = struct.unpack("!BI", header)
-
-    # Process first message
+    _, length = struct.unpack("!BI", header)
     await _binary_handle_one(reader, writer, length)
 
-    # Continue processing subsequent messages
     while True:
         msg_type, data = await decode_message(reader)
         if msg_type is None or data is None:
@@ -165,11 +212,8 @@ async def _binary_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
         if not parts:
             continue
 
-        command = parts[0]
-        args = parts[1:]
-
         try:
-            result = await execute(command, args)
+            result = await execute(parts[0], parts[1:])
             response = encode_message(TYPE_RESPONSE, result)
         except Exception as e:
             response = encode_message(TYPE_ERROR, str(e))
@@ -178,23 +222,18 @@ async def _binary_loop(reader: asyncio.StreamReader, writer: asyncio.StreamWrite
         await writer.drain()
 
 
-async def _binary_handle_one(reader, writer, length):
-    """Process one already-partially-read binary message."""
-    import struct
+async def _binary_handle_one(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, length: int):
     try:
         data_bytes = await reader.readexactly(length)
     except asyncio.IncompleteReadError:
         return
 
-    data = data_bytes.decode("utf-8", errors="replace")
-    parts = data.split()
+    parts = data_bytes.decode("utf-8", errors="replace").split()
     if not parts:
         return
 
-    command = parts[0]
-    args = parts[1:]
     try:
-        result = await execute(command, args)
+        result = await execute(parts[0], parts[1:])
         response = encode_message(TYPE_RESPONSE, result)
     except Exception as e:
         response = encode_message(TYPE_ERROR, str(e))
@@ -204,12 +243,24 @@ async def _binary_handle_one(reader, writer, length):
 
 
 # ---------------------------------------------------------------------------
-# Server entry point
+# Server entry point — returns the server object so main.py can shut it down
 # ---------------------------------------------------------------------------
 
-async def start_tcp_server(host: str = "0.0.0.0", port: int = 6379):
-    server = await asyncio.start_server(handle_client, host, port)
-    addr = server.sockets[0].getsockname()
-    print(f"[TCP] PulseDB listening on {addr} (RESP2 + Binary Protocol)")
-    async with server:
-        await server.serve_forever()
+_tcp_server = None
+
+
+async def start_tcp_server(host: str = TCP_HOST, port: int = TCP_PORT):
+    global _tcp_server
+    _tcp_server = await asyncio.start_server(handle_client, host, port)
+    addr = _tcp_server.sockets[0].getsockname()
+    print(f"[TCP] PulseDB listening on {addr} (RESP2 + Binary | auth={'on' if REQUIRE_PASS else 'off'})")
+    async with _tcp_server:
+        await _tcp_server.serve_forever()
+
+
+async def stop_tcp_server():
+    global _tcp_server
+    if _tcp_server:
+        _tcp_server.close()
+        await _tcp_server.wait_closed()
+        print("[TCP] Server stopped.")
