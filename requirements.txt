@@ -1,6 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 prometheus-fastapi-instrumentator
 requests
 websockets
+httpx
+numpy

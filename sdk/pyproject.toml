@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pulsedb"
+version = "1.1.0"
+description = "Python SDK for PulseDB Cloud — high-performance distributed in-memory database"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+keywords = ["database", "redis", "cache", "pubsub", "distributed", "in-memory"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "httpx>=0.26.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "respx"]
+
+[project.urls]
+Homepage = "https://github.com/gkavinrajanCodes/pulseDB"
+Repository = "https://github.com/gkavinrajanCodes/pulseDB"
+Issues = "https://github.com/gkavinrajanCodes/pulseDB/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pulsedb*"]
