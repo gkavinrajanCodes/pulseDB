@@ -83,6 +83,11 @@ class AsyncPulseDB:
             raise CommandError(result[7:])
         return result
 
+    async def execute_command(self, command: str, *args) -> Any:
+        """Execute a raw command."""
+        return await self._cmd(command, *args)
+
+
     # ------------------------------------------------------------------
     # Core KV operations
     # ------------------------------------------------------------------
@@ -137,6 +142,23 @@ class AsyncPulseDB:
     async def dbsize(self) -> int:
         """Return total number of keys."""
         return int(await self._cmd("DBSIZE"))
+
+    # ------------------------------------------------------------------
+    # Hash operations
+    # ------------------------------------------------------------------
+
+    async def hmset(self, key: str, mapping: dict) -> str:
+        """Set multiple fields in a hash."""
+        args = [key]
+        for k, v in mapping.items():
+            args.extend([k, str(v)])
+        return await self._cmd("HMSET", *args)
+
+    async def hgetall(self, key: str) -> List[str]:
+        """Get all fields and values in a hash as a flat list."""
+        result = await self._cmd("HGETALL", key)
+        return result if isinstance(result, list) else []
+
 
     # ------------------------------------------------------------------
     # Numeric operations

@@ -53,6 +53,9 @@ class PulseDB:
             host=host, port=port, api_key=api_key, tls=tls, timeout=timeout
         )
 
+    def execute_command(self, command: str, *args) -> Any:
+        return _run(self._async.execute_command(command, *args))
+
     def set(self, key: str, value: Any, ttl: Optional[float] = None) -> str:
         return _run(self._async.set(key, value, ttl))
 
@@ -82,6 +85,12 @@ class PulseDB:
 
     def dbsize(self) -> int:
         return _run(self._async.dbsize())
+
+    def hmset(self, key: str, mapping: dict) -> str:
+        return _run(self._async.hmset(key, mapping))
+
+    def hgetall(self, key: str) -> List[str]:
+        return _run(self._async.hgetall(key))
 
     def incr(self, key: str) -> int:
         return _run(self._async.incr(key))

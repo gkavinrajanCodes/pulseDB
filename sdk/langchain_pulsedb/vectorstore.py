@@ -50,7 +50,7 @@ class PulseDBVectorStore(VectorStore):
             key = self._get_key(doc_id)
             
             # Store the embedding
-            self._client._async._cmd("VECTOR.SET", key, *embedding)
+            self._client.execute_command("VECTOR.SET", key, *embedding)
             
             # Store the document data as a hash
             doc_data = {
@@ -75,7 +75,7 @@ class PulseDBVectorStore(VectorStore):
         embedding = self._embedding.embed_query(query)
         
         # Search the vector index
-        raw_results = self._client._async._cmd("VECTOR.SEARCH", *embedding, "TOP_K", k)
+        raw_results = self._client.execute_command("VECTOR.SEARCH", *embedding, "TOP_K", k)
         
         # Raw results come as [key1, score1, key2, score2, ...]
         if not isinstance(raw_results, list) or not raw_results:
