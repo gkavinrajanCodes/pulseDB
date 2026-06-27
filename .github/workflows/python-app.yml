@@ -24,7 +24,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pytest pytest-asyncio flake8 mypy httpx setuptools wheel
+        pip install pytest pytest-asyncio flake8 mypy httpx setuptools wheel langchain-core
         pip install -e sdk/
     - name: Lint with flake8
       run: |
