@@ -35,4 +35,6 @@ jobs:
         mypy server/ sdk/ --ignore-missing-imports
     - name: Test with pytest
       run: |
+        NODE_ID=node1 CLUSTER_NODES=node1 python3 -m uvicorn server.main:app --host 0.0.0.0 --port 8000 &
+        sleep 3
         PYTHONPATH=$(pwd):$(pwd)/sdk NODE_ID=node1 CLUSTER_NODES=node1 pytest tests/ -v
