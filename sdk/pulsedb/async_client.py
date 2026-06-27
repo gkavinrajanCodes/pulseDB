@@ -1,31 +1,104 @@
 # sdk/pulsedb/async_client.py
 """
-Async PulseDB client.
+Async PulseDB client using the ultra-fast Binary Protocol (RESP2 over TCP).
 
 Usage:
     import asyncio
     from pulsedb import AsyncPulseDB
 
     async def main():
-        db = AsyncPulseDB(host="localhost", port=8000, api_key="pulse-db-secret-key")
+        db = AsyncPulseDB(host="localhost", port=6379)
         await db.set("key", "value", ttl=3600)
         val = await db.get("key")
+
+        # Vector Engine Usage
+        await db.vectors.upsert("doc1", [0.1, 0.2, 0.3], metadata={"author": "John"})
+        results = await db.vectors.search([0.1, 0.2, 0.3], top_k=5, filter={"author": "John"})
 
     asyncio.run(main())
 """
 
-import asyncio
 import json
-from typing import Optional, List, Any
+import asyncio
+from typing import Optional, List, Any, Dict
 
-import httpx
+import redis
+import redis.asyncio as redis_async
+import numpy as np
 
-from .exceptions import CommandError, AuthenticationError, ConnectionError, TimeoutError
+from .exceptions import CommandError, ConnectionError, TimeoutError
+
+
+class AsyncVectorNamespace:
+    """
+    Provides a beautiful, Pythonic API for the PulseDB AI Memory Engine.
+    Transparently packs Python floats into C++ binary bytes and serializes metadata.
+    """
+    def __init__(self, db: "AsyncPulseDB"):
+        self.db = db
+
+    async def upsert(self, id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Insert or update a vector embedding with optional metadata."""
+        blob = np.array(vector, dtype=np.float32).tobytes()
+        args: List[Any] = [id, blob]
+        if metadata is not None:
+            args.extend(["METADATA", json.dumps(metadata)])
+            
+        try:
+            return await self.db.execute_command("VECTOR.BSET", *args)
+        except Exception as e:
+            if "dimension mismatch" in str(e).lower():
+                raise CommandError(f"Vector dimension mismatch: {e}")
+            raise CommandError(f"Failed to upsert vector: {e}")
+
+    async def get(self, id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a vector and its metadata by ID."""
+        result = await self.db.execute_command("VECTOR.GET", id)
+        if result == "NULL" or result is None:
+            return None
+        if isinstance(result, (bytes, bytearray)):
+            result = result.decode("utf-8")
+        if isinstance(result, str):
+            try:
+                return json.loads(result)
+            except json.JSONDecodeError:
+                return result # fallback
+        return result
+
+    async def search(self, query: List[float], top_k: int = 5, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Perform a blazing fast similarity search, optionally pre-filtering by metadata."""
+        blob = np.array(query, dtype=np.float32).tobytes()
+        args: List[Any] = [blob, "TOP_K", top_k]
+        if filter is not None:
+            args.extend(["FILTER", json.dumps(filter)])
+            
+        results = await self.db.execute_command("VECTOR.BSEARCH", *args)
+        if not results:
+            return []
+            
+        parsed = []
+        # Results return as flat array: [key1, score1, key2, score2, ...]
+        for i in range(0, len(results), 2):
+            doc_id = results[i]
+            if isinstance(doc_id, (bytes, bytearray)):
+                doc_id = doc_id.decode("utf-8")
+            score = float(results[i+1])
+            parsed.append({"id": doc_id, "score": score})
+            
+        return parsed
+
+    async def count(self) -> int:
+        """Get the total number of vectors in the AI Memory Engine."""
+        return int(await self.db.execute_command("VECTOR.COUNT"))
+
+    async def delete(self, id: str) -> str:
+        """Delete a vector from the AI Memory Engine."""
+        return await self.db.execute_command("VECTOR.DEL", id)
 
 
 class AsyncPulseDB:
     """
-    Async HTTP client for PulseDB Cloud.
+    Async TCP client for PulseDB Cloud.
 
     All methods are coroutines. Use with await inside an async function.
     For sync usage, see PulseDB (sync_client.py).
@@ -34,59 +107,46 @@ class AsyncPulseDB:
     def __init__(
         self,
         host: str = "localhost",
-        port: int = 8000,
-        api_key: str = "pulse-db-secret-key",
-        tls: bool = False,
-        timeout: float = 5.0,
+        port: int = 6379,
+        timeout: float = 10.0,
     ):
-        scheme = "https" if tls else "http"
-        self._base_url = f"{scheme}://{host}:{port}"
-        self._headers = {
-            "X-API-Key": api_key,
-            "Content-Type": "application/json",
-        }
+        self._host = host
+        self._port = port
         self._timeout = timeout
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[redis_async.Redis] = None
+        
+        # Initialize Vector AI Namespace
+        self.vectors = AsyncVectorNamespace(self)
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                headers=self._headers,
-                timeout=self._timeout,
+    def _get_client(self) -> redis_async.Redis:
+        if self._client is None:
+            # We use protocol=2 for backwards compatibility with our custom RESP2 router
+            self._client = redis_async.Redis(
+                host=self._host,
+                port=self._port,
+                socket_timeout=self._timeout,
+                decode_responses=True,
+                protocol=2
             )
         return self._client
 
-    async def _cmd(self, command: str, *args) -> Any:
-        """Send a command and return the parsed result."""
-        client = await self._get_client()
-        try:
-            resp = await client.post(
-                "/command",
-                json={"command": command, "args": [str(a) for a in args]},
-            )
-        except httpx.ConnectError as e:
-            raise ConnectionError(f"Cannot connect to PulseDB at {self._base_url}: {e}") from e
-        except httpx.TimeoutException as e:
-            raise TimeoutError(f"Command '{command}' timed out") from e
-
-        if resp.status_code == 403:
-            raise AuthenticationError("Invalid API key")
-        if resp.status_code == 429:
-            raise CommandError("Rate limit exceeded")
-        if resp.status_code >= 500:
-            raise CommandError(f"Server error: {resp.text}")
-
-        data = resp.json()
-        result = data.get("result")
-        if isinstance(result, str) and result.startswith("ERROR:"):
-            raise CommandError(result[7:])
-        return result
-
     async def execute_command(self, command: str, *args) -> Any:
         """Execute a raw command."""
-        return await self._cmd(command, *args)
-
+        client = self._get_client()
+        try:
+            result = await client.execute_command(command, *args)
+            if isinstance(result, str) and result.startswith("ERROR:"):
+                raise CommandError(result[7:])
+            return result
+        except redis.exceptions.ConnectionError as e:
+            raise ConnectionError(f"Cannot connect to PulseDB at {self._host}:{self._port}: {e}") from e
+        except redis.exceptions.TimeoutError as e:
+            raise TimeoutError(f"Command '{command}' timed out") from e
+        except redis.exceptions.ResponseError as e:
+            err_msg = str(e)
+            if err_msg.startswith("ERROR:"):
+                raise CommandError(err_msg[7:])
+            raise CommandError(err_msg)
 
     # ------------------------------------------------------------------
     # Core KV operations
@@ -97,51 +157,51 @@ class AsyncPulseDB:
         args = [key, str(value)]
         if ttl is not None:
             args += ["EX", str(int(ttl))]
-        return await self._cmd("SET", *args)
+        return await self.execute_command("SET", *args)
 
     async def get(self, key: str) -> Optional[str]:
         """Get value for key. Returns None if key doesn't exist."""
-        result = await self._cmd("GET", key)
+        result = await self.execute_command("GET", key)
         return None if result == "NULL" else result
 
     async def delete(self, *keys: str) -> str:
         """Delete one or more keys."""
-        return await self._cmd("DEL", *keys)
+        return await self.execute_command("DEL", *keys)
 
     async def exists(self, key: str) -> bool:
         """Return True if the key exists."""
-        return bool(await self._cmd("EXISTS", key))
+        return bool(await self.execute_command("EXISTS", key))
 
     async def expire(self, key: str, seconds: float) -> int:
         """Set TTL on a key. Returns 1 if set, 0 if key not found."""
-        return await self._cmd("EXPIRE", key, str(seconds))
+        return await self.execute_command("EXPIRE", key, str(seconds))
 
     async def ttl(self, key: str) -> int:
         """Get remaining TTL in seconds. -1 = no TTL. -2 = key not found."""
-        return await self._cmd("TTL", key)
+        return await self.execute_command("TTL", key)
 
     async def mset(self, mapping: dict) -> str:
         """Set multiple keys at once."""
         args = []
         for k, v in mapping.items():
             args += [k, str(v)]
-        return await self._cmd("MSET", *args)
+        return await self.execute_command("MSET", *args)
 
     async def mget(self, *keys: str) -> List[Optional[str]]:
         """Get multiple keys at once. Returns list with None for missing keys."""
-        results = await self._cmd("MGET", *keys)
+        results = await self.execute_command("MGET", *keys)
         if isinstance(results, list):
             return [None if v == "NULL" else v for v in results]
         return results
 
     async def keys(self, pattern: str = "*") -> List[str]:
         """Return all keys matching a glob pattern."""
-        result = await self._cmd("KEYS", pattern)
+        result = await self.execute_command("KEYS", pattern)
         return result if isinstance(result, list) else []
 
     async def dbsize(self) -> int:
         """Return total number of keys."""
-        return int(await self._cmd("DBSIZE"))
+        return int(await self.execute_command("DBSIZE"))
 
     # ------------------------------------------------------------------
     # Hash operations
@@ -152,13 +212,17 @@ class AsyncPulseDB:
         args = [key]
         for k, v in mapping.items():
             args.extend([k, str(v)])
-        return await self._cmd("HMSET", *args)
+        return await self.execute_command("HMSET", *args)
 
     async def hgetall(self, key: str) -> List[str]:
         """Get all fields and values in a hash as a flat list."""
-        result = await self._cmd("HGETALL", key)
+        result = await self.execute_command("HGETALL", key)
+        if isinstance(result, dict):
+            flat = []
+            for k, v in result.items():
+                flat.extend([k, str(v)])
+            return flat
         return result if isinstance(result, list) else []
-
 
     # ------------------------------------------------------------------
     # Numeric operations
@@ -166,50 +230,26 @@ class AsyncPulseDB:
 
     async def incr(self, key: str) -> int:
         """Increment integer value of key by 1."""
-        return int(await self._cmd("INCR", key))
+        return int(await self.execute_command("INCR", key))
 
     async def incrby(self, key: str, amount: int) -> int:
         """Increment integer value of key by amount."""
-        return int(await self._cmd("INCRBY", key, str(amount)))
+        return int(await self.execute_command("INCRBY", key, str(amount)))
 
     async def decr(self, key: str) -> int:
         """Decrement integer value of key by 1."""
-        return int(await self._cmd("DECR", key))
+        return int(await self.execute_command("DECR", key))
 
     async def decrby(self, key: str, amount: int) -> int:
         """Decrement integer value of key by amount."""
-        return int(await self._cmd("DECRBY", key, str(amount)))
-
-    # ------------------------------------------------------------------
-    # Pub/Sub
-    # ------------------------------------------------------------------
-
-    async def publish(self, channel: str, message: str) -> str:
-        """Publish a message to a channel."""
-        return await self._cmd("PUBLISH", channel, message)
-
-    # ------------------------------------------------------------------
-    # Admin
-    # ------------------------------------------------------------------
-
-    async def ping(self) -> str:
-        """Ping the server. Returns 'PONG' if alive."""
-        return await self._cmd("PING")
-
-    async def flush(self) -> str:
-        """Delete all keys in the database."""
-        return await self._cmd("FLUSHDB")
-
-    async def info(self) -> str:
-        """Get server info string."""
-        return await self._cmd("INFO")
+        return int(await self.execute_command("DECRBY", key, str(amount)))
 
     # ------------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------------
 
     async def close(self):
-        if self._client and not self._client.is_closed:
+        if self._client:
             await self._client.aclose()
 
     async def __aenter__(self):

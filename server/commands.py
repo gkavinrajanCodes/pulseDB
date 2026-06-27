@@ -301,7 +301,10 @@ async def execute(command: str, args: list, persist: bool = True):
 
     elif command == "VECTOR.GET":
         vec = vector_index.get(args[0])
-        return vec if vec is not None else "NULL"
+        if vec is None:
+            return "NULL"
+        import json
+        return json.dumps(vec)
 
     elif command == "VECTOR.DEL":
         return vector_index.delete(args[0])

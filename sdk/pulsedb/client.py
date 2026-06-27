@@ -5,30 +5,60 @@ Synchronous PulseDB client (wraps the async client).
 Usage:
     from pulsedb import PulseDB
 
-    db = PulseDB(host="localhost", port=8000, api_key="pulse-db-secret-key")
+    db = PulseDB(host="localhost", port=6379)
     db.set("key", "value", ttl=3600)
     val = db.get("key")
+
+    # Vector Engine Usage
+    db.vectors.upsert("doc1", [0.1, 0.2, 0.3], metadata={"author": "John"})
+    results = db.vectors.search([0.1, 0.2, 0.3], top_k=5, filter={"author": "John"})
 """
 
 import asyncio
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 from .async_client import AsyncPulseDB
 
 
+import threading
+
+_loop = asyncio.new_event_loop()
+_thread = threading.Thread(target=_loop.run_forever, daemon=True)
+_thread.start()
+
 def _run(coro):
-    """Run a coroutine in a new event loop (sync bridge)."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Inside an existing event loop (e.g., Jupyter) — use a thread
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
+    """Run a coroutine in the background event loop (sync bridge)."""
+    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    return future.result()
+
+
+class VectorNamespace:
+    """
+    Provides a beautiful, Pythonic API for the PulseDB AI Memory Engine.
+    Transparently packs Python floats into C++ binary bytes and serializes metadata.
+    """
+    def __init__(self, async_namespace):
+        self._async = async_namespace
+
+    def upsert(self, id: str, vector: List[float], metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Insert or update a vector embedding with optional metadata."""
+        return _run(self._async.upsert(id, vector, metadata))
+
+    def get(self, id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a vector and its metadata by ID."""
+        return _run(self._async.get(id))
+
+    def search(self, query: List[float], top_k: int = 5, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+        """Perform a blazing fast similarity search, optionally pre-filtering by metadata."""
+        return _run(self._async.search(query, top_k, filter))
+
+    def count(self) -> int:
+        """Get the total number of vectors in the AI Memory Engine."""
+        return _run(self._async.count())
+
+    def delete(self, id: str) -> str:
+        """Delete a vector from the AI Memory Engine."""
+        return _run(self._async.delete(id))
 
 
 class PulseDB:
@@ -44,14 +74,13 @@ class PulseDB:
     def __init__(
         self,
         host: str = "localhost",
-        port: int = 8000,
-        api_key: str = "pulse-db-secret-key",
-        tls: bool = False,
-        timeout: float = 5.0,
+        port: int = 6379,
+        timeout: float = 10.0,
     ):
         self._async = AsyncPulseDB(
-            host=host, port=port, api_key=api_key, tls=tls, timeout=timeout
+            host=host, port=port, timeout=timeout
         )
+        self.vectors = VectorNamespace(self._async.vectors)
 
     def execute_command(self, command: str, *args) -> Any:
         return _run(self._async.execute_command(command, *args))

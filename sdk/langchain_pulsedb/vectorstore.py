@@ -1,6 +1,5 @@
-import json
 import uuid
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple, Dict
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -17,12 +16,11 @@ class PulseDBVectorStore(VectorStore):
         embedding: Embeddings,
         client: Optional[PulseDB] = None,
         host: str = "localhost",
-        port: int = 8000,
-        api_key: str = "pulse-db-secret-key",
+        port: int = 6379,
         collection_name: str = "langchain",
     ):
         self._embedding = embedding
-        self._client = client or PulseDB(host=host, port=port, api_key=api_key)
+        self._client = client or PulseDB(host=host, port=port)
         self._collection = collection_name
 
     def _get_key(self, doc_id: str) -> str:
@@ -49,58 +47,47 @@ class PulseDBVectorStore(VectorStore):
         for text, metadata, doc_id, embedding in zip(texts, metadatas, ids, embeddings):
             key = self._get_key(doc_id)
             
-            # Store the embedding
-            self._client.execute_command("VECTOR.SET", key, *embedding)
+            # Embed the text directly into the PulseDB Hybrid Search metadata dictionary
+            doc_metadata = metadata.copy()
+            doc_metadata["_text"] = text
             
-            # Store the document data as a hash
-            doc_data = {
-                "text": text,
-                "metadata": json.dumps(metadata)
-            }
-            self._client.hmset(f"{key}:data", doc_data)
+            # Use the blazing fast TCP Vector Namespace
+            self._client.vectors.upsert(key, embedding, metadata=doc_metadata)
 
         return ids
 
     def similarity_search(
-        self, query: str, k: int = 4, **kwargs: Any
+        self, query: str, k: int = 4, filter: Optional[Dict[str, Any]] = None, **kwargs: Any
     ) -> List[Document]:
         """Return docs most similar to query."""
-        results = self.similarity_search_with_score(query, k=k, **kwargs)
+        results = self.similarity_search_with_score(query, k=k, filter=filter, **kwargs)
         return [doc for doc, _ in results]
 
     def similarity_search_with_score(
-        self, query: str, k: int = 4, **kwargs: Any
+        self, query: str, k: int = 4, filter: Optional[Dict[str, Any]] = None, **kwargs: Any
     ) -> List[Tuple[Document, float]]:
         """Return docs most similar to query, along with scores."""
         embedding = self._embedding.embed_query(query)
         
-        # Search the vector index
-        raw_results = self._client.execute_command("VECTOR.SEARCH", *embedding, "TOP_K", k)
+        # Search the vector index using the native TCP Binary Protocol
+        raw_results = self._client.vectors.search(embedding, top_k=k, filter=filter)
         
-        # Raw results come as [key1, score1, key2, score2, ...]
-        if not isinstance(raw_results, list) or not raw_results:
-            return []
-
         docs_with_scores = []
-        for i in range(0, len(raw_results), 2):
-            key = raw_results[i]
-            score = float(raw_results[i+1])
+        for res in raw_results:
+            key = res["id"]
+            score = res["score"]
             
             # Only process keys in our collection
             if not key.startswith(f"{self._collection}:"):
                 continue
 
-            # Fetch document data
-            data = self._client.hgetall(f"{key}:data")
-            if not data:
+            # Fetch the metadata dictionary
+            doc_data = self._client.vectors.get(key)
+            if not doc_data:
                 continue
 
-            # data is a flat list [field1, val1, field2, val2...]
-            # Convert to dict
-            doc_dict = {data[j]: data[j+1] for j in range(0, len(data), 2)}
-            
-            text = doc_dict.get("text", "")
-            metadata = json.loads(doc_dict.get("metadata", "{}"))
+            metadata = doc_data.get("metadata", {})
+            text = metadata.pop("_text", "")
             
             doc = Document(page_content=text, metadata=metadata)
             docs_with_scores.append((doc, score))
