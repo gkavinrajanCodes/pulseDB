@@ -5,4 +5,5 @@ prometheus-fastapi-instrumentator
 requests
 websockets
 httpx
-numpyhnswlib
+numpy
+hnswlib
