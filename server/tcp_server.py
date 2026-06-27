@@ -268,7 +268,6 @@ async def start_tcp_server(host: str = TCP_HOST, port: int = TCP_PORT):
 
 
 async def stop_tcp_server():
-    global _tcp_server
     if _tcp_server:
         _tcp_server.close()
         await _tcp_server.wait_closed()
