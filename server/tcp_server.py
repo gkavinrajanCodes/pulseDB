@@ -15,10 +15,12 @@ Security:
 
 import asyncio
 import struct
+import os
 from server.resp import decode_command, encode, encode_simple, encode_error
+import ssl
 from server.protocol import decode_message, encode_message, TYPE_RESPONSE, TYPE_ERROR
 from server.commands import execute
-from server.config import REQUIRE_PASS, TCP_HOST, TCP_PORT
+from server.config import REQUIRE_PASS, TCP_HOST, TCP_PORT, TLS_CERT, TLS_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +253,16 @@ _tcp_server = None
 
 async def start_tcp_server(host: str = TCP_HOST, port: int = TCP_PORT):
     global _tcp_server
-    _tcp_server = await asyncio.start_server(handle_client, host, port)
+    
+    ssl_context = None
+    if TLS_CERT and TLS_KEY and os.path.exists(TLS_CERT) and os.path.exists(TLS_KEY):
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.load_cert_chain(certfile=TLS_CERT, keyfile=TLS_KEY)
+        
+    _tcp_server = await asyncio.start_server(handle_client, host, port, ssl=ssl_context)
     addr = _tcp_server.sockets[0].getsockname()
-    print(f"[TCP] PulseDB listening on {addr} (RESP2 + Binary | auth={'on' if REQUIRE_PASS else 'off'})")
+    protocol = "rediss://" if ssl_context else "redis://"
+    print(f"[TCP] PulseDB listening on {protocol}{addr[0]}:{addr[1]} (auth={'on' if REQUIRE_PASS else 'off'})")
     async with _tcp_server:
         await _tcp_server.serve_forever()
 

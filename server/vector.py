@@ -7,10 +7,11 @@ The dimensionality of the index is determined by the first vector inserted.
 """
 
 import threading
+from typing import Any
 import numpy as np
 
 try:
-    import hnswlib
+    import hnswlib  # type: ignore
 except ImportError:
     hnswlib = None
 
@@ -23,7 +24,7 @@ class VectorIndex:
     def __init__(self, space: str = 'cosine'):
         self._space = space
         self._dim = None
-        self._index = None
+        self._index: Any = None
         self._lock = threading.RLock()
         
         # hnswlib requires integer labels. We map string keys <-> integer IDs.
@@ -37,13 +38,14 @@ class VectorIndex:
     def _init_index(self, dim: int):
         """Initialize the HNSW index on the first insertion."""
         self._dim = dim
+        # pyrefly: ignore [missing-attribute]
         self._index = hnswlib.Index(space=self._space, dim=self._dim)
         # Initialize with max_elements=10000. We will dynamically resize as needed.
         self._index.init_index(max_elements=10000, ef_construction=200, M=16)
 
     def _resize_if_needed(self):
         """Double the capacity of the index if it's full."""
-        if self._index.element_count >= self._index.max_elements:
+        if self._index is not None and self._index.element_count >= self._index.max_elements:
             self._index.resize_index(self._index.max_elements * 2)
 
     def set(self, key: str, vector: list[float]) -> str:
@@ -75,6 +77,7 @@ class VectorIndex:
             
             # Add to index and raw store
             np_vector = np.array([vector], dtype=np.float32)
+            # pyrefly: ignore [missing-attribute]
             self._index.add_items(np_vector, np.array([label]))
             self._store[key] = vector
             

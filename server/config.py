@@ -9,6 +9,10 @@ import os
 API_KEY: str = os.getenv("PULSEDB_API_KEY", "pulse-db-secret-key")
 REQUIRE_PASS: str = os.getenv("PULSEDB_REQUIREPASS", "")   # empty = no TCP auth required
 
+# --- TLS ---
+TLS_CERT: str = os.getenv("PULSEDB_TLS_CERT", "")
+TLS_KEY: str = os.getenv("PULSEDB_TLS_KEY", "")
+
 # --- Cluster ---
 NODE_ID: str = os.getenv("NODE_ID", "node1")
 CLUSTER_NODES: list[str] = os.getenv("CLUSTER_NODES", "node1").split(",")
