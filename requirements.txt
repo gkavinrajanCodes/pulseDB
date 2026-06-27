@@ -4,6 +4,6 @@ pydantic
 prometheus-fastapi-instrumentator
 requests
 websockets
-httpx
+redis
 numpy
 hnswlib
