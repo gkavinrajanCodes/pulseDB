@@ -1,5 +1,6 @@
 import asyncio
 import time
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, Request, HTTPException, Depends, Security
 from fastapi.responses import JSONResponse
 from fastapi.security.api_key import APIKeyHeader
@@ -13,7 +14,19 @@ from server.tcp_server import start_tcp_server
 from server.persistence import start_persistence
 from server.store import store
 
-app = FastAPI(title="PulseDB Cloud", version="1.0.0")
+# --- Lifespan (replaces deprecated @app.on_event) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    start_persistence(store)
+    start_ttl_thread()
+    asyncio.create_task(start_tcp_server())
+    print("[Server] PulseDB Cloud started.")
+    yield
+    # Shutdown (add cleanup here if needed in future)
+
+
+app = FastAPI(title="PulseDB Cloud", version="1.0.0", lifespan=lifespan)
 
 # --- Prometheus Metrics ---
 Instrumentator().instrument(app).expose(app)
@@ -59,17 +72,6 @@ class CommandRequest(BaseModel):
     command: str
     args: list
 
-
-# --- Startup ---
-@app.on_event("startup")
-async def startup_event():
-    # 1. Persistence: load snapshot + replay WAL synchronously
-    start_persistence(store)
-    # 2. Background TTL cleanup thread
-    start_ttl_thread()
-    # 3. TCP server as asyncio background task
-    asyncio.create_task(start_tcp_server())
-    print("[Server] PulseDB Cloud started.")
 
 
 # --- Health Checks ---

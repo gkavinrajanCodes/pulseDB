@@ -11,7 +11,7 @@ async def handle_client(reader, writer):
     try:
         while True:
             msg_type, data = await decode_message(reader)
-            if msg_type is None:
+            if msg_type is None or data is None:
                 break
             
             # Simple protocol: command args... (space separated)
