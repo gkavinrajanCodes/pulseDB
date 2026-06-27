@@ -62,8 +62,8 @@ class AsyncVectorNamespace:
             try:
                 return json.loads(result)
             except json.JSONDecodeError:
-                return result # fallback
-        return result
+                return None # fallback
+        return result if isinstance(result, dict) else None
 
     async def search(self, query: List[float], top_k: int = 5, filter: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Perform a blazing fast similarity search, optionally pre-filtering by metadata."""
@@ -243,6 +243,30 @@ class AsyncPulseDB:
     async def decrby(self, key: str, amount: int) -> int:
         """Decrement integer value of key by amount."""
         return int(await self.execute_command("DECRBY", key, str(amount)))
+
+    # ------------------------------------------------------------------
+    # Pub/Sub
+    # ------------------------------------------------------------------
+
+    async def publish(self, channel: str, message: str) -> str:
+        """Publish a message to a channel."""
+        return await self.execute_command("PUBLISH", channel, message)
+
+    # ------------------------------------------------------------------
+    # Admin
+    # ------------------------------------------------------------------
+
+    async def ping(self) -> str:
+        """Ping the server. Returns 'PONG' if alive."""
+        return await self.execute_command("PING")
+
+    async def flush(self) -> str:
+        """Delete all keys in the database."""
+        return await self.execute_command("FLUSHDB")
+
+    async def info(self) -> str:
+        """Get server info string."""
+        return await self.execute_command("INFO")
 
     # ------------------------------------------------------------------
     # Context manager support
