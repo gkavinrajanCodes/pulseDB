@@ -4,16 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pulsedb"
-version = "1.0.0"
+version = "1.0.1"
 authors = [
   { name="G Kavinrajan", email="gkavinrajan@example.com" },
 ]
 description = "High-performance Python Vector Database & Memory Engine with RESP2 support."
 readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "License :: Other/Proprietary License",
     "Operating System :: OS Independent",
     "Topic :: Database",
 ]
