@@ -463,7 +463,7 @@ async def execute(command: str, args: list, persist: bool = True):
             return "ERROR: ZADD requires key score member"
         key = args[0]
         try:
-            mapping = {args[i+1]: float(args[i]) for i in range(1, len(args)-1, 2)}
+            mapping: dict = {args[i+1]: float(args[i]) for i in range(1, len(args)-1, 2)}
         except (ValueError, IndexError):
             return "ERROR: ZADD score must be a float"
         return zset_store.zadd(key, mapping)
