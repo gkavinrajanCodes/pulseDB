@@ -44,15 +44,14 @@ class PulseDBVectorStore(VectorStore):
         if metadatas is None:
             metadatas = [{} for _ in texts]
 
+        batch = []
         for text, metadata, doc_id, embedding in zip(texts, metadatas, ids, embeddings):
             key = self._get_key(doc_id)
-            
-            # Embed the text directly into the PulseDB Hybrid Search metadata dictionary
             doc_metadata = metadata.copy()
             doc_metadata["_text"] = text
-            
-            # Use the blazing fast TCP Vector Namespace
-            self._client.vectors.upsert(key, embedding, metadata=doc_metadata)
+            batch.append({"id": key, "vector": embedding, "metadata": doc_metadata})
+
+        self._client.vectors.upsert_batch(batch)
 
         return ids
 

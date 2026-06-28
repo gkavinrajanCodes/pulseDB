@@ -44,6 +44,10 @@ class VectorNamespace:
         """Insert or update a vector embedding with optional metadata."""
         return _run(self._async.upsert(id, vector, metadata))
 
+    def upsert_batch(self, items: List[Dict[str, Any]]) -> int:
+        """Bulk-insert multiple vectors in a single network round-trip."""
+        return _run(self._async.upsert_batch(items))
+
     def get(self, id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a vector and its metadata by ID."""
         return _run(self._async.get(id))

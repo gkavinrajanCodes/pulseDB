@@ -45,6 +45,40 @@ async def execute(command: str, args: list, persist: bool = True):
         except Exception as e:
             return f"ERROR: Invalid binary blob: {e}"
 
+    elif command == "VECTOR.BSET_BATCH":
+        # VECTOR.BSET_BATCH <json_array>
+        # Each element: {"id": str, "blob": hex_encoded_bytes, "metadata": dict (optional)}
+        if len(args) < 1:
+            return "ERROR: VECTOR.BSET_BATCH requires a JSON payload"
+        import json
+        try:
+            payload_str = args[0].decode("utf-8") if isinstance(args[0], bytes) else args[0]
+            items = json.loads(payload_str)
+        except Exception:
+            return "ERROR: Invalid BSET_BATCH JSON payload"
+        if not isinstance(items, list):
+            return "ERROR: BSET_BATCH payload must be a JSON array"
+
+        inserted = 0
+        errors = []
+        for item in items:
+            try:
+                key = str(item["id"])
+                blob = bytes.fromhex(item["blob"])
+                metadata = item.get("metadata")
+                vector = np.frombuffer(blob, dtype=np.float32).tolist()
+                result = vector_index.set(key, vector, metadata)
+                if result == "OK":
+                    inserted += 1
+                else:
+                    errors.append(f"{key}: {result}")
+            except Exception as e:
+                errors.append(f"{item.get('id', '?')}: {e}")
+
+        if errors:
+            return f"PARTIAL: {inserted} inserted, errors: {'; '.join(errors[:3])}"
+        return f"OK:{inserted}"
+
     elif command == "VECTOR.BSEARCH":
         try:
             blob = args[0]

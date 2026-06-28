@@ -131,14 +131,54 @@ class VectorIndex:
             
             filter_func = None
             if filter_dict:
+                def _match_field(item_val: Any, condition: Any) -> bool:
+                    """Evaluate one filter condition against a metadata field value."""
+                    if isinstance(condition, dict):
+                        # Operator-based filter e.g. {"$gt": 2020}
+                        for op, op_val in condition.items():
+                            if op == "$eq":
+                                if item_val != op_val:
+                                    return False
+                            elif op == "$ne":
+                                if item_val == op_val:
+                                    return False
+                            elif op == "$gt":
+                                if not (item_val is not None and item_val > op_val):
+                                    return False
+                            elif op == "$gte":
+                                if not (item_val is not None and item_val >= op_val):
+                                    return False
+                            elif op == "$lt":
+                                if not (item_val is not None and item_val < op_val):
+                                    return False
+                            elif op == "$lte":
+                                if not (item_val is not None and item_val <= op_val):
+                                    return False
+                            elif op == "$in":
+                                if item_val not in op_val:
+                                    return False
+                            elif op == "$contains":
+                                # For list fields or substring checks
+                                if isinstance(item_val, list):
+                                    if op_val not in item_val:
+                                        return False
+                                elif isinstance(item_val, str):
+                                    if op_val not in item_val:
+                                        return False
+                                else:
+                                    return False
+                        return True
+                    else:
+                        # Plain exact match (backward compatible)
+                        return item_val == condition
+
                 def _filter(label: int) -> bool:
                     key = self._id_to_key.get(label)
                     if not key:
                         return False
                     item_meta = self._store.get(key, {}).get("metadata", {})
-                    # Exact match for all keys in filter_dict
-                    for k, v in filter_dict.items():
-                        if item_meta.get(k) != v:
+                    for k, condition in filter_dict.items():
+                        if not _match_field(item_meta.get(k), condition):
                             return False
                     return True
                 filter_func = _filter

@@ -44,6 +44,53 @@ async def test_vector_edge_cases():
     # Bad query
     res = await execute("VECTOR.SEARCH", ["abc", "TOP_K", "1"])
     assert res.startswith("ERROR: query vector dimensions must be floats")
-    
-    # Empty search gracefully returns empty
-    # Wait, we need to add tests for mismatched dimensions once HNSW is implemented in Phase 2
+
+@pytest.mark.asyncio
+async def test_vector_filter_operators():
+    """Test advanced metadata filter operators: $in, $gt, $lte, $contains, $ne."""
+    from server.vector import VectorIndex
+
+    idx = VectorIndex()
+
+    idx.set("a", [1.0, 0.0], metadata={"category": "sports", "year": 2024, "tags": ["python", "fast"]})
+    idx.set("b", [0.9, 0.1], metadata={"category": "tech",   "year": 2021, "tags": ["go", "fast"]})
+    idx.set("c", [0.8, 0.2], metadata={"category": "sports", "year": 2019, "tags": ["rust"]})
+    idx.set("d", [0.7, 0.3], metadata={"category": "news",   "year": 2022, "tags": ["python"]})
+
+    query = [1.0, 0.0]
+
+    # $in — return only sports and news
+    results = idx.search(query, top_k=4, filter_dict={"category": {"$in": ["sports", "news"]}})
+    ids = [r[0] for r in results]
+    assert "a" in ids and "c" in ids and "d" in ids
+    assert "b" not in ids
+
+    # $gt — return only articles after 2020
+    results = idx.search(query, top_k=4, filter_dict={"year": {"$gt": 2020}})
+    ids = [r[0] for r in results]
+    assert "a" in ids and "b" in ids and "d" in ids
+    assert "c" not in ids
+
+    # $lte — return articles up to and including 2021
+    results = idx.search(query, top_k=4, filter_dict={"year": {"$lte": 2021}})
+    ids = [r[0] for r in results]
+    assert "b" in ids and "c" in ids
+    assert "a" not in ids and "d" not in ids
+
+    # $contains — return only docs with 'python' in their tags list
+    results = idx.search(query, top_k=4, filter_dict={"tags": {"$contains": "python"}})
+    ids = [r[0] for r in results]
+    assert "a" in ids and "d" in ids
+    assert "b" not in ids and "c" not in ids
+
+    # $ne — return all except sports
+    results = idx.search(query, top_k=4, filter_dict={"category": {"$ne": "sports"}})
+    ids = [r[0] for r in results]
+    assert "b" in ids and "d" in ids
+    assert "a" not in ids and "c" not in ids
+
+    # Exact match still works (backward compatibility)
+    results = idx.search(query, top_k=4, filter_dict={"category": "tech"})
+    ids = [r[0] for r in results]
+    assert ids == ["b"]
+

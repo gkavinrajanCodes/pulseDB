@@ -51,6 +51,45 @@ class AsyncVectorNamespace:
                 raise CommandError(f"Vector dimension mismatch: {e}")
             raise CommandError(f"Failed to upsert vector: {e}")
 
+    async def upsert_batch(self, items: List[Dict[str, Any]]) -> int:
+        """
+        Bulk-insert or update multiple vectors in a single network round-trip.
+
+        Args:
+            items: List of dicts, each with:
+                - ``id`` (str): unique key
+                - ``vector`` (List[float]): embedding values
+                - ``metadata`` (dict, optional): metadata for hybrid filtering
+
+        Returns:
+            Number of vectors successfully inserted.
+
+        Example::
+
+            await db.vectors.upsert_batch([
+                {"id": "doc1", "vector": [0.1, 0.2], "metadata": {"cat": "news"}},
+                {"id": "doc2", "vector": [0.9, 0.8], "metadata": {"cat": "sports"}},
+            ])
+        """
+        payload = []
+        for item in items:
+            blob = np.array(item["vector"], dtype=np.float32).tobytes()
+            entry: Dict[str, Any] = {"id": item["id"], "blob": blob.hex()}
+            if "metadata" in item and item["metadata"] is not None:
+                entry["metadata"] = item["metadata"]
+            payload.append(entry)
+
+        try:
+            result = await self.db.execute_command("VECTOR.BSET_BATCH", json.dumps(payload))
+            # Response: "OK:N" or "PARTIAL: N inserted, errors: ..."
+            if isinstance(result, str) and result.startswith("OK:"):
+                return int(result[3:])
+            raise CommandError(f"Batch upsert error: {result}")
+        except CommandError:
+            raise
+        except Exception as e:
+            raise CommandError(f"Failed to batch upsert: {e}")
+
     async def get(self, id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a vector and its metadata by ID."""
         result = await self.db.execute_command("VECTOR.GET", id)
