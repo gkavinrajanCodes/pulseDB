@@ -186,4 +186,4 @@ All PRs are validated against our CI matrix (Python 3.10, 3.11, 3.12 with flake8
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
+Distributed under the Business Source License (BSL 1.1). See [LICENSE](LICENSE) for details.
