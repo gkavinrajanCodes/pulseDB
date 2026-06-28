@@ -16,6 +16,13 @@ __pycache__/
 # Local database files
 pulsedb.wal
 pulsedb.snapshot
+*.hnsw
+*_hnsw.meta.json
+
+# Scratch / one-off test files
+test_hnsw_filter.py
+server_log.txt
+server.log
 
 # OS generated
 .DS_Store
