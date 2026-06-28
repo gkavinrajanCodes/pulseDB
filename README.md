@@ -8,7 +8,7 @@ Built for developers who need Redis-compatible storage *and* lightning-fast sema
 
 [![CI](https://github.com/gkavinrajanCodes/pulseDB/actions/workflows/python-app.yml/badge.svg)](https://github.com/gkavinrajanCodes/pulseDB/actions)
 [![Python](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12-blue)](https://pypi.org/project/pulsedb/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1-blue.svg)](LICENSE)
 
 </div>
 
