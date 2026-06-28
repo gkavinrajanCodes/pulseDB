@@ -233,3 +233,186 @@ class HashStore:
 # ---------------------------------------------------------------------------
 list_store = ListStore()
 hash_store = HashStore()
+
+
+# ---------------------------------------------------------------------------
+# Sorted Set Store
+# ---------------------------------------------------------------------------
+
+class SortedSetStore:
+    """
+    Implements Redis-compatible sorted set operations.
+
+    Uses Python's built-in `bisect` module for O(log N) inserts and range queries.
+    Each sorted set is stored as a dict of member→score and a sorted list of
+    (score, member) tuples for range queries.
+    """
+
+    def __init__(self, num_shards: int = 16):
+        import bisect
+        self._bisect = bisect
+        self._shards: list[dict] = [{}  for _ in range(num_shards)]
+        self._locks: list[threading.Lock] = [threading.Lock() for _ in range(num_shards)]
+        self._num_shards = num_shards
+
+    def _shard(self, key: str):
+        idx = int(hashlib.md5(key.encode()).hexdigest(), 16) % self._num_shards
+        return self._shards[idx], self._locks[idx]
+
+    def _get_zset(self, data: dict, key: str) -> dict:
+        """Return or create the zset structure: {"scores": {member: score}, "sorted": [(score, member)]}"""
+        if key not in data:
+            data[key] = {"scores": {}, "sorted": []}
+        return data[key]
+
+    def zadd(self, key: str, mapping: dict) -> int:
+        """Add members with scores. Returns number of NEW members added."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = self._get_zset(data, key)
+            added = 0
+            for member, score in mapping.items():
+                score = float(score)
+                old_score = zset["scores"].get(member)
+                if old_score is not None:
+                    # Remove old entry from sorted list
+                    idx = self._bisect.bisect_left(zset["sorted"], (old_score, member))
+                    if idx < len(zset["sorted"]) and zset["sorted"][idx] == (old_score, member):
+                        zset["sorted"].pop(idx)
+                else:
+                    added += 1
+                zset["scores"][member] = score
+                self._bisect.insort(zset["sorted"], (score, member))
+            return added
+
+    def zscore(self, key: str, member: str):
+        """Get score of a member. Returns None if not found."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset:
+                return None
+            return zset["scores"].get(member)
+
+    def zrank(self, key: str, member: str):
+        """Get 0-based rank of member (ascending). Returns None if not found."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset or member not in zset["scores"]:
+                return None
+            score = zset["scores"][member]
+            idx = self._bisect.bisect_left(zset["sorted"], (score, member))
+            return idx
+
+    def zrange(self, key: str, start: int, stop: int, withscores: bool = False) -> list:
+        """Return members in ascending score order by rank range [start, stop]."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset:
+                return []
+            length = len(zset["sorted"])
+            if start < 0:
+                start = max(0, length + start)
+            if stop < 0:
+                stop = length + stop
+            stop = min(stop, length - 1)
+            if start > stop:
+                return []
+            items = zset["sorted"][start: stop + 1]
+            if withscores:
+                result = []
+                for score, member in items:
+                    result.extend([member, str(score)])
+                return result
+            return [member for _, member in items]
+
+    def zrevrange(self, key: str, start: int, stop: int, withscores: bool = False) -> list:
+        """Return members in descending score order by rank range [start, stop]."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset:
+                return []
+            reversed_list = list(reversed(zset["sorted"]))
+            length = len(reversed_list)
+            if start < 0:
+                start = max(0, length + start)
+            if stop < 0:
+                stop = length + stop
+            stop = min(stop, length - 1)
+            if start > stop:
+                return []
+            items = reversed_list[start: stop + 1]
+            if withscores:
+                result = []
+                for score, member in items:
+                    result.extend([member, str(score)])
+                return result
+            return [member for _, member in items]
+
+    def zrangebyscore(self, key: str, min_score: float, max_score: float, withscores: bool = False) -> list:
+        """Return members with scores between min_score and max_score (inclusive)."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset:
+                return []
+            lo = self._bisect.bisect_left(zset["sorted"], (min_score, ""))
+            hi = self._bisect.bisect_right(zset["sorted"], (max_score, "\xff\xff\xff\xff"))
+            items = zset["sorted"][lo:hi]
+            if withscores:
+                result = []
+                for score, member in items:
+                    result.extend([member, str(score)])
+                return result
+            return [member for _, member in items]
+
+    def zrem(self, key: str, *members) -> int:
+        """Remove one or more members. Returns count of removed members."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            if not zset:
+                return 0
+            removed = 0
+            for member in members:
+                score = zset["scores"].pop(member, None)
+                if score is not None:
+                    idx = self._bisect.bisect_left(zset["sorted"], (score, member))
+                    if idx < len(zset["sorted"]) and zset["sorted"][idx] == (score, member):
+                        zset["sorted"].pop(idx)
+                    removed += 1
+            if not zset["scores"]:
+                data.pop(key, None)
+            return removed
+
+    def zcard(self, key: str) -> int:
+        """Return the number of members in the sorted set."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = data.get(key)
+            return len(zset["scores"]) if zset else 0
+
+    def zincrby(self, key: str, increment: float, member: str) -> float:
+        """Increment the score of a member."""
+        data, lock = self._shard(key)
+        with lock:
+            zset = self._get_zset(data, key)
+            old_score = zset["scores"].get(member)
+            if old_score is not None:
+                idx = self._bisect.bisect_left(zset["sorted"], (old_score, member))
+                if idx < len(zset["sorted"]) and zset["sorted"][idx] == (old_score, member):
+                    zset["sorted"].pop(idx)
+            new_score = (old_score or 0.0) + float(increment)
+            zset["scores"][member] = new_score
+            self._bisect.insort(zset["sorted"], (new_score, member))
+            return new_score
+
+    def zcount(self, key: str, min_score: float, max_score: float) -> int:
+        """Count members with scores between min and max (inclusive)."""
+        return len(self.zrangebyscore(key, min_score, max_score))
+
+
+zset_store = SortedSetStore()

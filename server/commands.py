@@ -11,7 +11,7 @@ from server.pubsub import pubsub
 from server.persistence import wal
 from server.cluster import cluster_manager
 from server.vector import vector_index
-from server.data_types import list_store, hash_store
+from server.data_types import list_store, hash_store, zset_store
 import numpy as np
 
 
@@ -453,6 +453,62 @@ async def execute(command: str, args: list, persist: bool = True):
 
     elif command == "HINCRBY":
         return hash_store.hincrby(args[0], args[1], int(args[2]))
+
+    # ------------------------------------------------------------------
+    # Sorted Set commands (ZADD / ZRANGE / ZRANGEBYSCORE / ZRANK / ZSCORE)
+    # ------------------------------------------------------------------
+    elif command == "ZADD":
+        # ZADD key score member [score member ...]
+        if len(args) < 3:
+            return "ERROR: ZADD requires key score member"
+        key = args[0]
+        try:
+            mapping = {args[i+1]: float(args[i]) for i in range(1, len(args)-1, 2)}
+        except (ValueError, IndexError):
+            return "ERROR: ZADD score must be a float"
+        return zset_store.zadd(key, mapping)
+
+    elif command == "ZSCORE":
+        v = zset_store.zscore(args[0], args[1])
+        return str(v) if v is not None else "NULL"
+
+    elif command == "ZRANK":
+        v = zset_store.zrank(args[0], args[1])
+        return v if v is not None else "NULL"
+
+    elif command == "ZRANGE":
+        withscores = len(args) > 3 and args[3].upper() == "WITHSCORES"
+        return zset_store.zrange(args[0], int(args[1]), int(args[2]), withscores=withscores)
+
+    elif command == "ZREVRANGE":
+        withscores = len(args) > 3 and args[3].upper() == "WITHSCORES"
+        return zset_store.zrevrange(args[0], int(args[1]), int(args[2]), withscores=withscores)
+
+    elif command == "ZRANGEBYSCORE":
+        withscores = "WITHSCORES" in [a.upper() for a in args[3:]]
+        try:
+            min_s = float("-inf") if args[1] == "-inf" else float(args[1])
+            max_s = float("+inf") if args[2] == "+inf" else float(args[2])
+        except ValueError:
+            return "ERROR: ZRANGEBYSCORE min/max must be floats or -inf/+inf"
+        return zset_store.zrangebyscore(args[0], min_s, max_s, withscores=withscores)
+
+    elif command == "ZREM":
+        return zset_store.zrem(args[0], *args[1:])
+
+    elif command == "ZCARD":
+        return zset_store.zcard(args[0])
+
+    elif command == "ZINCRBY":
+        return zset_store.zincrby(args[0], float(args[1]), args[2])
+
+    elif command == "ZCOUNT":
+        try:
+            min_s = float("-inf") if args[1] == "-inf" else float(args[1])
+            max_s = float("+inf") if args[2] == "+inf" else float(args[2])
+        except ValueError:
+            return "ERROR: ZCOUNT min/max must be floats or -inf/+inf"
+        return zset_store.zcount(args[0], min_s, max_s)
 
     else:
         return f"ERROR: Unknown command '{command}'"
