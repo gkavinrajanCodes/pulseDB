@@ -1,3 +1,6 @@
+# Copyright (c) 2026 G Kavinrajan. All rights reserved.
+# Licensed under the Business Source License 1.1
+
 # server/vector.py
 """
 AI Memory Layer — Vector Search Engine using HNSW.

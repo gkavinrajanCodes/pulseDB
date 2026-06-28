@@ -1,3 +1,6 @@
+# Copyright (c) 2026 G Kavinrajan. All rights reserved.
+# Licensed under the Business Source License 1.1
+
 # sdk/pulsedb/async_client.py
 """
 Async PulseDB client using the ultra-fast Binary Protocol (RESP2 over TCP).

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 G Kavinrajan. All rights reserved.
+# Licensed under the Business Source License 1.1
+
 # server/resp.py
 """
 RESP2 (Redis Serialization Protocol v2) encoder and decoder.
