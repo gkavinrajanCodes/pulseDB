@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pulsedb"
+version = "1.0.0"
+authors = [
+  { name="G Kavinrajan", email="gkavinrajan@example.com" },
+]
+description = "High-performance Python Vector Database & Memory Engine with RESP2 support."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+]
+dependencies = [
+    "redis>=5.0.0",
+    "numpy>=1.20.0",
+    "hnswlib>=0.8.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/gkavinrajanCodes/pulseDB"
+"Bug Tracker" = "https://github.com/gkavinrajanCodes/pulseDB/issues"
+
+[tool.setuptools.packages.find]
+where = ["sdk"]
+include = ["pulsedb", "pulsedb.*", "langchain_pulsedb", "langchain_pulsedb.*"]

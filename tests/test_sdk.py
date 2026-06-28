@@ -17,9 +17,10 @@ async def test_async_sdk_core():
         await db.set("test_async", "val")
         assert await db.get("test_async") == "val"
         
-        # Test lists via raw execute
-        await db.execute_command("LPUSH", "mylist_test_async", "a", "b")
-        assert await db.execute_command("LLEN", "mylist_test_async") == 2
+        import uuid
+        list_key = f"mylist_{uuid.uuid4().hex}"
+        await db.execute_command("LPUSH", list_key, "a", "b")
+        assert await db.execute_command("LLEN", list_key) == 2
         
         # Test hashes
         await db.hmset("myhash", {"f1": "v1", "f2": "v2"})
