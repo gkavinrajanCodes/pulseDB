@@ -38,7 +38,7 @@ def test_sync_sdk_core():
 # We test the new Vector Namespace and LangChain wrapper
 def test_langchain_wrapper():
     asyncio.run(_cleanup())
-    from sdk.langchain_pulsedb.vectorstore import PulseDBVectorStore
+    from langchain_pulsedb.vectorstore import PulseDBVectorStore
     
     class DummyEmbeddings:
         def embed_documents(self, texts):
