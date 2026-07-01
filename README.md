@@ -98,7 +98,7 @@ PulseDB works natively as a LangChain VectorStore, giving your RAG pipeline blaz
 
 ```python
 from langchain_openai import OpenAIEmbeddings
-from sdk.langchain_pulsedb.vectorstore import PulseDBVectorStore
+from langchain_pulsedb.vectorstore import PulseDBVectorStore
 
 store = PulseDBVectorStore(
     embedding=OpenAIEmbeddings(),
