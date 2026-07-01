@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pulsedb"
-version = "1.1.0"
+version = "1.0.2"
 description = "Python SDK for PulseDB Cloud — high-performance distributed in-memory database"
 readme = "README.md"
 license = { file = "LICENSE" }
